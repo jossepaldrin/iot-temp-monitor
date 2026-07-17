@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IoT Temperature Monitoring Dashboard</title>
+<script src="{{ url_for('static', filename='chart.umd.min.js') }}"></script>
+<style>
+  :root {
+    --bg: #0f1720;
+    --panel: #17212b;
+    --border: #26323d;
+    --text: #e7edf3;
+    --muted: #8fa1b3;
+    --accent: #ff7a59;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding: 24px;
+  }
+  h1 { font-size: 1.4rem; margin-bottom: 4px; }
+  .subtitle { color: var(--muted); margin-top: 0; margin-bottom: 24px; font-size: 0.9rem; }
+  .top-row {
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+    margin-bottom: 20px;
+    align-items: stretch;
+  }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 18px 20px;
+  }
+  .latest-card {
+    min-width: 220px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+  .latest-label { color: var(--muted); font-size: 0.85rem; margin-bottom: 6px; }
+  .latest-value { font-size: 2.2rem; font-weight: 600; color: var(--accent); }
+  .latest-time { color: var(--muted); font-size: 0.8rem; margin-top: 4px; }
+  .controls-card { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  button, a.button {
+    background: var(--accent);
+    color: #1a1005;
+    border: none;
+    padding: 10px 16px;
+    border-radius: 6px;
+    font-weight: 600;
+    cursor: pointer;
+    text-decoration: none;
+    font-size: 0.85rem;
+    display: inline-block;
+  }
+  button:hover, a.button:hover { opacity: 0.9; }
+  .status { color: var(--muted); font-size: 0.8rem; }
+  .chart-card { margin-bottom: 20px; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.88rem;
+  }
+  th, td {
+    text-align: left;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border);
+  }
+  th { color: var(--muted); font-weight: 600; }
+  tbody tr:hover { background: rgba(255,255,255,0.03); }
+  .table-scroll { max-height: 320px; overflow-y: auto; }
+</style>
+</head>
+<body>
+
+<h1>IoT Temperature Monitoring Dashboard</h1>
+<p class="subtitle">Live readings from the Supabase temperature_readings table</p>
+
+<div class="top-row">
+  <div class="card latest-card">
+    <div class="latest-label">Latest reading</div>
+    <div class="latest-value" id="latest-value">-- °C</div>
+    <div class="latest-time" id="latest-time">Waiting for data...</div>
+  </div>
+  <div class="card controls-card">
+    <button id="refresh-btn">Reload now</button>
+    <a class="button" href="/export">Export CSV</a>
+    <span class="status" id="status-text">Auto-refreshing every 5s</span>
+  </div>
+</div>
+
+<div class="card chart-card">
+  <canvas id="tempChart" height="90"></canvas>
+</div>
+
+<div class="card">
+  <div class="table-scroll">
+    <table>
+      <thead>
+        <tr><th>Timestamp</th><th>Temperature (&deg;C)</th></tr>
+      </thead>
+      <tbody id="readings-body">
+        <tr><td colspan="2">Loading...</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+const ctx = document.getElementById('tempChart').getContext('2d');
+const chart = new Chart(ctx, {
+  type: 'line',
+  data: {
+    labels: [],
+    datasets: [{
+      label: 'Temperature (°C)',
+      data: [],
+      borderColor: '#ff7a59',
+      backgroundColor: 'rgba(255, 122, 89, 0.15)',
+      tension: 0.3,
+      fill: true,
+      pointRadius: 2,
+    }]
+  },
+  options: {
+    responsive: true,
+    animation: false,
+    scales: {
+      x: { ticks: { color: '#8fa1b3', maxTicksLimit: 12 }, grid: { color: '#26323d' } },
+      y: { ticks: { color: '#8fa1b3' }, grid: { color: '#26323d' }, suggestedMin: 15, suggestedMax: 45 }
+    },
+    plugins: { legend: { labels: { color: '#e7edf3' } } }
+  }
+});
+
+function formatTimestamp(row) {
+  return `${row.reading_date} ${row.reading_time}`;
+}
+
+async function loadReadings() {
+  const statusEl = document.getElementById('status-text');
+  try {
+    const res = await fetch('/api/readings');
+    const payload = await res.json();
+    if (!payload.success) throw new Error(payload.error || 'Unknown error');
+
+    const readings = payload.readings;
+
+    // Update chart
+    chart.data.labels = readings.map(formatTimestamp);
+    chart.data.datasets[0].data = readings.map(r => r.temperature);
+    chart.update();
+
+    // Update table (most recent first)
+    const tbody = document.getElementById('readings-body');
+    tbody.innerHTML = '';
+    for (const row of [...readings].reverse()) {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td>${formatTimestamp(row)}</td><td>${row.temperature}</td>`;
+      tbody.appendChild(tr);
+    }
+
+    // Update latest reading card
+    if (readings.length > 0) {
+      const latest = readings[readings.length - 1];
+      document.getElementById('latest-value').textContent = `${latest.temperature} °C`;
+      document.getElementById('latest-time').textContent = formatTimestamp(latest);
+    }
+
+    statusEl.textContent = 'Auto-refreshing every 5s · last updated ' + new Date().toLocaleTimeString();
+  } catch (err) {
+    statusEl.textContent = 'Error loading data: ' + err.message;
+  }
+}
+
+document.getElementById('refresh-btn').addEventListener('click', loadReadings);
+loadReadings();
+setInterval(loadReadings, 5000);
+</script>
+
+</body>
+</html>
