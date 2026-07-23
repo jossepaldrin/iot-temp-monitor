@@ -52,6 +52,11 @@ def index():
     return render_template("index.html")
 
 
+@app.route("/live-mqtt")
+def live_mqtt():
+    return render_template("mqtt_monitor.html")
+
+
 @app.route("/api/readings")
 def api_readings():
     """JSON endpoint the frontend polls every 5 seconds."""

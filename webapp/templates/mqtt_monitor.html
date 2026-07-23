@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Live MQTT Monitor</title>
+<script src="{{ url_for('static', filename='mqtt.min.js') }}"></script>
+<style>
+  :root {
+    --bg: #0f1720; --panel: #17212b; --border: #26323d;
+    --text: #e7edf3; --muted: #8fa1b3; --accent: #3fb950;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: -apple-system, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); padding: 24px; }
+  h1 { font-size: 1.4rem; margin-bottom: 4px; }
+  .subtitle { color: var(--muted); margin-top: 0; margin-bottom: 20px; font-size: 0.9rem; }
+  a.back { color: var(--muted); font-size: 0.85rem; text-decoration: none; }
+  a.back:hover { text-decoration: underline; }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 18px 20px; margin-bottom: 20px; }
+  .status-row { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: #6e7681; }
+  .dot.connected { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+  .dot.error { background: #f85149; }
+  .meta { color: var(--muted); font-size: 0.8rem; }
+  .topic-label { font-family: monospace; color: var(--accent); }
+  .log {
+    font-family: "Consolas", monospace;
+    font-size: 0.85rem;
+    max-height: 420px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column-reverse;
+  }
+  .log-line { padding: 6px 4px; border-bottom: 1px solid var(--border); display: flex; gap: 14px; }
+  .log-line .t { color: var(--muted); min-width: 170px; }
+  .log-line .v { color: var(--accent); font-weight: 600; min-width: 70px; }
+  .empty { color: var(--muted); padding: 10px 4px; }
+</style>
+</head>
+<body>
+
+<a class="back" href="/">&larr; Back to dashboard</a>
+<h1>Live MQTT Monitor</h1>
+<p class="subtitle">Browser subscribes directly to the broker over WebSocket - raw pub/sub traffic, no database in between</p>
+
+<div class="card">
+  <div class="status-row">
+    <div class="dot" id="status-dot"></div>
+    <strong id="status-text">Connecting...</strong>
+  </div>
+  <div class="meta">Broker: <span id="broker-label"></span> &middot; Topic: <span class="topic-label" id="topic-label"></span></div>
+</div>
+
+<div class="card">
+  <div class="log" id="log">
+    <div class="empty">Waiting for the first message...</div>
+  </div>
+</div>
+
+<script>
+const BROKER_WS_URL = "ws://broker.hivemq.com:8000/mqtt";
+const TOPIC = "csda306/aldrinaypejoseph/iot-temp-monitor/temperature";
+
+document.getElementById("broker-label").textContent = BROKER_WS_URL;
+document.getElementById("topic-label").textContent = TOPIC;
+
+const dot = document.getElementById("status-dot");
+const statusText = document.getElementById("status-text");
+const log = document.getElementById("log");
+let messageCount = 0;
+
+const client = mqtt.connect(BROKER_WS_URL, {
+  clientId: "iot-temp-webviewer-" + Math.random().toString(16).slice(2, 8),
+  reconnectPeriod: 3000,
+});
+
+client.on("connect", () => {
+  dot.className = "dot connected";
+  statusText.textContent = "Connected - subscribed live";
+  client.subscribe(TOPIC);
+});
+
+client.on("reconnect", () => {
+  dot.className = "dot";
+  statusText.textContent = "Reconnecting...";
+});
+
+client.on("error", (err) => {
+  dot.className = "dot error";
+  statusText.textContent = "Connection error: " + err.message;
+});
+
+client.on("message", (topic, payloadBuffer) => {
+  let data;
+  try {
+    data = JSON.parse(payloadBuffer.toString());
+  } catch (e) {
+    return;
+  }
+
+  if (messageCount === 0) log.innerHTML = "";
+  messageCount++;
+
+  const line = document.createElement("div");
+  line.className = "log-line";
+  line.innerHTML = `
+    <span class="t">${data.reading_date} ${data.reading_time}</span>
+    <span class="v">${data.temperature}&deg;C</span>
+    <span class="meta">message #${messageCount}</span>
+  `;
+  log.prepend(line);
+
+  while (log.children.length > 50) {
+    log.removeChild(log.lastChild);
+  }
+});
+</script>
+
+</body>
+</html>
